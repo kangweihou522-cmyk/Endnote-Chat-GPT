@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <link rel="stylesheet" href="app.css">
+  <script defer src="renderer.js"></script>
+  <title>EndNote ChatGPT</title>
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>EndNote ChatGPT</h1>
+      <p>检查并补全期刊论文资料</p>
+    </div>
+    <details id="account" class="account">
+      <summary id="account-summary">连接 ChatGPT</summary>
+      <div class="account-panel">
+        <h2>ChatGPT 订阅额度</h2>
+        <p id="account-status">登录 OpenAI 并授权使用你的 ChatGPT 套餐。</p>
+        <div class="controls">
+          <button id="login" class="primary" type="button">Continue with ChatGPT</button>
+          <button id="logout" type="button" hidden>退出</button>
+          <button id="models" type="button" hidden>刷新模型</button>
+          <button id="usage" class="link" type="button">查看用量</button>
+        </div>
+        <label for="model" class="field-label">模型</label>
+        <select id="model" disabled><option value="">请先登录</option></select>
+        <p class="muted">生成译名会提交题名。核对候选时会提交相关文献字段。PDF 和笔记留在本机。</p>
+      </div>
+    </details>
+  </header>
+
+  <section class="toolbar" aria-label="文献检查操作">
+    <button id="open" type="button">打开 EndNote XML</button>
+    <button id="scan" class="primary" type="button" disabled>一键检查补全</button>
+    <button id="cancel" type="button" hidden>停止检查</button>
+    <button id="save" type="button" disabled>导出已选修改</button>
+    <div class="translation-options">
+      <label><input type="checkbox" id="translate" disabled> ChatGPT 补译名</label>
+      <label for="language" class="visually-hidden">译名语言</label>
+      <select id="language">
+        <option value="Simplified Chinese">简体中文</option>
+        <option value="English">英语</option>
+      </select>
+    </div>
+  </section>
+  <div class="task-status" role="status" aria-live="polite">
+    <span id="notice">从 EndNote 导出所选条目为 XML，然后在这里打开。</span>
+    <progress id="progress" max="1" value="0" hidden></progress>
+  </div>
+
+  <main class="workspace">
+    <aside class="library" aria-label="文献列表">
+      <div class="panel-heading"><h2>文献列表</h2><span id="count">0 条</span></div>
+      <ul id="records" class="records"></ul>
+    </aside>
+    <section class="review" id="review" aria-label="核对结果">
+      <div class="empty">
+        <h2>检查结果</h2>
+        <p>打开 XML 后，点击「一键检查补全」，再核对有差异的字段。</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

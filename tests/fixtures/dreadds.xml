@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xml>
+  <records>
+    <record>
+      <rec-number>467</rec-number>
+      <ref-type name="Journal Article">17</ref-type>
+      <contributors><authors>
+        <author><style face="normal" font="default" size="100%">Urban, D. J.</style></author>
+        <author><style face="normal" font="default" size="100%">Roth, B. L.</style></author>
+      </authors></contributors>
+      <titles>
+        <title><style face="normal" font="default" size="100%">DREADDs (designer receptors exclusively activated by designer drugs): chemogenetic tools with therapeutic utility</style></title>
+        <secondary-title><style face="normal" font="default" size="100%">Annu Rev Pharmacol Toxicol</style></secondary-title>
+      </titles>
+      <periodical><full-title>Annu Rev Pharmacol Toxicol</full-title></periodical>
+      <dates><year>2015</year></dates>
+      <notes><style face="italic" font="default" size="100%">XML 中的备注示例</style></notes>
+    </record>
+  </records>
+</xml>

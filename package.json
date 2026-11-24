@@ -1,0 +1,25 @@
+{
+  "name": "endnote-chatgpt",
+  "productName": "EndNote ChatGPT",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Check and complete EndNote journal articles with Crossref, PubMed and ChatGPT plan usage.",
+  "main": "src/main.cjs",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "package:win": "electron-packager . EndNote-ChatGPT --platform=win32 --arch=x64 --out=dist --overwrite --asar --ignore=\"^/(tests|scripts|dist)(/|$)\""
+  },
+  "dependencies": {
+    "@xmldom/xmldom": "0.9.12",
+    "entities": "9.0.0"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "45.4.1"
+  },
+  "license": "AGPL-3.0-only"
+}
