@@ -55,7 +55,8 @@ function rankCandidates(record, works) {
       Number(matchJournal) * 7 + Number(matchPosition) * 5 + Number(idConfirmed) * 80 +
       Number(group.length > 1) * 3 - Number(conflictingId) * 28 -
       Number(conflictingAuthor) * 16 - Number(conflictingYear) * 9;
-    const supportedTitle = (matchTitle === 1 && (informativeTitle || (matchAuthor && (matchYear || matchJournal)))) ||
+    const supportedTitle = (matchTitle === 1 && (informativeTitle || (matchAuthor && (matchYear || matchJournal)) ||
+      group.filter(work => [work.title, work.otherTitle].some(name => fold(title) === fold(name))).length > 1)) ||
       (matchTitle >= 0.94 && informativeTitle && matchAuthor && (matchYear || matchJournal || idConfirmed));
     const safe = !conflictingId && !conflictingAuthor && !conflictingYear &&
       (idConfirmed ? (!title || matchTitle >= 0.85) : supportedTitle);

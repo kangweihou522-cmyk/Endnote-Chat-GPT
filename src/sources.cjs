@@ -51,6 +51,8 @@ function crossrefWork(work) {
     abbreviations: (work['short-container-title'] || []).map(sourceText).filter(Boolean),
     volume: clean(work.volume), issue: clean(work.issue || work['journal-issue']?.issue),
     pages: clean(work.page || work['article-number']), doi, pmid: '',
+    pdfUrls: (work.link || []).filter(link => /^application\/pdf(?:$|;)/i.test(link['content-type'] || ''))
+      .map(link => clean(link.URL)).filter(Boolean),
     issns: normalizeIssns([...(work.ISSN || []), ...(work['issn-type'] || []).map(item => item.value)]),
     ...dates(print.length || online.length ? print : general, online, print.length ? 'issue' : 'unspecified')
   };
@@ -93,7 +95,8 @@ function parsePubmed(text) {
     const pageRange = firstPage && lastPage ? firstPage + '-' + lastPage : '';
     return {
       source: 'PubMed', url: pmid ? 'https://pubmed.ncbi.nlm.nih.gov/' + pmid + '/' : '',
-      pmid, doi, title, otherTitle: original ? englishTitle.replace(/^\[(.*)\]\.?$/u, '$1') : '',
+      pmid, doi, pmcid: clean(identifiers.find(id => id.getAttribute('IdType') === 'pmc')?.textContent),
+      title, otherTitle: original ? englishTitle.replace(/^\[(.*)\]\.?$/u, '$1') : '',
       translationLanguage: original && englishTitle ? 'English' : '',
       authors, journal: value(journal, 'Title'),
       abbreviations: [value(journal, 'ISOAbbreviation'), value(medline, 'MedlineJournalInfo', 'MedlineTA')].filter(Boolean),

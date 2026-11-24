@@ -6,13 +6,14 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
   <link rel="stylesheet" href="app.css">
   <script defer src="renderer.js"></script>
+  <script defer src="ris-ui.js"></script>
   <title>EndNote ChatGPT</title>
 </head>
 <body>
   <header class="app-header">
     <div>
       <h1>EndNote ChatGPT</h1>
-      <p>检查并补全期刊论文资料</p>
+      <p>期刊论文检索、RIS 导出与全文入口</p>
     </div>
     <details id="account" class="account">
       <summary id="account-summary">连接 ChatGPT</summary>
@@ -32,7 +33,30 @@
     </details>
   </header>
 
-  <section class="toolbar" aria-label="文献检查操作">
+  <nav class="mode-switch" aria-label="工作方式">
+    <button id="mode-ris" type="button" aria-pressed="true">标题转 RIS</button>
+    <button id="mode-xml" type="button" aria-pressed="false">批量检查 XML</button>
+  </nav>
+
+  <main id="ris-workspace" class="ris-workspace">
+    <form id="ris-form" class="ris-form">
+      <label for="ris-title">论文标题或 DOI</label>
+      <div class="ris-search-line">
+        <input id="ris-title" type="search" maxlength="750" required autocomplete="off" placeholder="粘贴论文标题">
+        <button id="ris-search" class="primary" type="submit">查找论文</button>
+      </div>
+      <div class="ris-options">
+        <label><input type="checkbox" id="ris-translate" disabled> ChatGPT 生成译名</label>
+        <label for="ris-language" class="visually-hidden">译名语言</label>
+        <select id="ris-language"><option value="Simplified Chinese">简体中文</option><option value="English">英语</option></select>
+        <button id="ris-cancel" type="button" hidden>停止查询</button>
+      </div>
+    </form>
+    <p id="ris-status" class="ris-status" role="status" aria-live="polite"></p>
+    <div id="ris-result" class="ris-result"></div>
+  </main>
+
+  <section id="xml-toolbar" class="toolbar" aria-label="文献检查操作" hidden>
     <button id="open" type="button">打开 EndNote XML</button>
     <button id="scan" class="primary" type="button" disabled>一键检查补全</button>
     <button id="cancel" type="button" hidden>停止检查</button>
@@ -46,12 +70,12 @@
       </select>
     </div>
   </section>
-  <div class="task-status" role="status" aria-live="polite">
+  <div id="xml-status" class="task-status" hidden role="status" aria-live="polite">
     <span id="notice">从 EndNote 导出所选条目为 XML，然后在这里打开。</span>
     <progress id="progress" max="1" value="0" hidden></progress>
   </div>
 
-  <main class="workspace">
+  <main id="xml-workspace" class="workspace" hidden>
     <aside class="library" aria-label="文献列表">
       <div class="panel-heading"><h2>文献列表</h2><span id="count">0 条</span></div>
       <ul id="records" class="records"></ul>

@@ -58,6 +58,7 @@ function sync() {
   model.disabled = !hasModels || Boolean(busy || accountBusy);
   translate.disabled = !hasModels || Boolean(busy || accountBusy);
   language.disabled = Boolean(busy);
+  window.syncRis?.();
 }
 
 function activeAccount(state, applyDefault = false) {

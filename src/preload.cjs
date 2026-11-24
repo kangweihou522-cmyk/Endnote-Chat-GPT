@@ -21,6 +21,13 @@ contextBridge.exposeInMainWorld('endnote', {
   translate: options => invoke('translate-one', options),
   source: url => invoke('open-source', url),
   save: changes => invoke('save-file', changes),
+  risSearch: options => invoke('ris-search', options),
+  risChoose: options => invoke('ris-choose', options),
+  risSuggest: options => invoke('ris-suggest', options),
+  risEnrich: options => invoke('ris-enrich', options),
+  risLink: options => invoke('ris-link', options),
+  risSave: options => invoke('ris-save', options),
+  onRisUpdate: handle => { ipcRenderer.on('ris-update', (_, value) => handle(value)); },
   onResult: handle => { ipcRenderer.on('review-result', (_, value) => handle(value)); },
   onProgress: handle => { ipcRenderer.on('review-progress', (_, value) => handle(value)); }
 });

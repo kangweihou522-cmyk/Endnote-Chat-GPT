@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell, clipboard } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { constants } = require('node:fs');
@@ -8,6 +8,9 @@ const { readRecords, exportChanges } = require('./endnote.cjs');
 const { providers } = require('./sources.cjs');
 const { inspectRecord, pickFields, sourceDetails } = require('./review.cjs');
 const { createDesktopAuth, translateTitles, suggestCandidate } = require('./chatgpt.cjs');
+
+const { titleRecord, exportRis, risFileName } = require('./ris.cjs');
+const { findFullText } = require('./fulltext.cjs');
 
 const ENTRY = path.join(__dirname, 'index.html');
 const ALLOWED_LANGUAGES = ['Simplified Chinese', 'English'];
@@ -19,6 +22,7 @@ let catalog = [];
 let login;
 let scan;
 let session;
+let risSession;
 let resultMap = new Map();
 
 function createWindow() {
@@ -112,15 +116,19 @@ function translationEntry(index, result) {
   return original ? { index, result, field, original } : null;
 }
 
+function setTranslation(field, proposed) {
+  Object.assign(field, {
+    proposed, status: 'ai', canApply: true,
+    sources: [{ name: 'ChatGPT', url: '' }], note: '机器翻译，建议核对术语。'
+  });
+}
+
 async function applyTranslations(batch, language, model, signal) {
   const translations = await translateTitles(auth, batch.map(item => item.original), language, model, signal);
   batch.forEach(({ index, result, field }, position) => {
     const proposed = translations[position];
     if (!proposed) return;
-    Object.assign(field, {
-      proposed, status: 'ai', canApply: true,
-      sources: [{ name: 'ChatGPT', url: '' }], note: '机器翻译，建议核对术语。'
-    });
+    setTranslation(field, proposed);
     publishResult(index, result);
   });
 }
@@ -162,7 +170,116 @@ async function scanRecords({ translate, model, language }, signal) {
   return { aiError };
 }
 
+function risState(job) {
+  return {
+    ...publicResult(0, job.result),
+    links: job.links,
+    pdfWarning: job.pdfWarning,
+    aiWarning: job.aiWarning
+  };
+}
+
+async function saveOutput(target, content) {
+  const temporary = target + '.' + randomUUID() + '.tmp';
+  try {
+    await fs.writeFile(temporary, content, { mode: 0o600, flag: constants.O_CREAT | constants.O_WRONLY | constants.O_EXCL });
+    await fs.rename(temporary, target);
+  } finally { await fs.rm(temporary, { force: true }); }
+}
+
+function currentRis(requireMatch = true) {
+  const job = risSession;
+  if (!job || (requireMatch && !job.result.fields.length)) throw new Error('请先确认一篇论文。');
+  return job;
+}
+
+function risFields(record, group, language) {
+  const blank = { ...record, data: { ...record.data, title: '', doi: '' } };
+  return pickFields(blank, group, validLanguage(language));
+}
+
+function registerRisHandlers() {
+  const sources = providers();
+  register('ris-search', ({ title, language }) => withScan(async signal => {
+    risSession = undefined;
+    const record = titleRecord(title);
+    const result = await inspectRecord(record, sources, validLanguage(language), signal);
+    if (result.selected !== null && result.candidates?.[result.selected]) {
+      result.fields = risFields(record, result.candidates[result.selected].group, language);
+    }
+    risSession = { record, result, links: [], pdfWarning: '', aiWarning: '' };
+    return risState(risSession);
+  }));
+
+  register('ris-choose', ({ candidate, language }) => {
+    if (scan) throw new Error('请等待当前查询结束。');
+    const job = currentRis(false);
+    const choice = Number.isInteger(candidate) && job.result.candidates?.[candidate];
+    if (!choice) throw new Error('请选择列表中的论文。');
+    Object.assign(job.result, {
+      selected: candidate, status: 'matched', note: '',
+      fields: risFields(job.record, choice.group, language)
+    });
+    job.links = [];
+    job.pdfWarning = '';
+    job.aiWarning = '';
+    return risState(job);
+  });
+
+  register('ris-suggest', ({ model }) => withScan(async signal => {
+    const job = currentRis(false);
+    if (!job.result.candidates?.length) throw new Error('暂无可核对的候选。');
+    job.result.ai = await suggestCandidate(auth, job.record, job.result.candidates, getModel(true, model), signal);
+    return risState(job);
+  }));
+
+  register('ris-enrich', ({ translate, model, language }) => withScan(async signal => {
+    const job = currentRis();
+    const candidate = job.result.candidates[job.result.selected];
+    const pdf = findFullText(candidate.group, signal).then(({ links, warning }) => {
+      signal.throwIfAborted();
+      job.links = links;
+      job.pdfWarning = warning;
+      emit('ris-update', risState(job));
+    });
+    const pending = translate && translationEntry(0, job.result);
+    const ai = pending ? (async () => {
+      try {
+        const [translated] = await translateTitles(auth, [pending.original], validLanguage(language), getModel(true, model), signal);
+        if (translated) setTranslation(pending.field, translated);
+      } catch (error) {
+        signal.throwIfAborted();
+        job.aiWarning = error.message;
+      }
+    })() : null;
+    await Promise.all([pdf, ai]);
+    return risState(job);
+  }));
+
+  register('ris-link', async ({ url, copy }) => {
+    const link = currentRis().links.find(item => item.url === url);
+    if (!link) throw new Error('此链接不在当前论文的查询结果中。');
+    if (copy) clipboard.writeText(link.url);
+    else await shell.openExternal(link.url);
+  });
+
+  register('ris-save', async ({ approved }) => {
+    const job = currentRis();
+    const content = exportRis(job.result.fields, Array.isArray(approved) ? approved : []);
+    const title = job.result.fields.find(field => field.key === 'title')?.proposed;
+    const save = await dialog.showSaveDialog(window, {
+      title: '保存 RIS 文献', defaultPath: risFileName(title),
+      filters: [{ name: 'RIS', extensions: ['ris'] }]
+    });
+    if (save.canceled) return null;
+    const target = /\.ris$/i.test(save.filePath) ? save.filePath : save.filePath + '.ris';
+    await saveOutput(target, content);
+    return path.basename(target);
+  });
+}
+
 function registerHandlers() {
+  registerRisHandlers();
   register('auth-status', accountState);
   register('auth-login', async () => {
     if (login || scan) throw new Error('请等待当前操作完成。');
@@ -272,11 +389,7 @@ function registerHandlers() {
     });
     const absolute = filename => process.platform === 'win32' ? filename.toLowerCase() : filename;
     if (absolute(canonicalInput) === absolute(canonicalOutput)) throw new Error('请使用新文件名保存补全后的条目。');
-    const temporary = outputPath + '.' + randomUUID() + '.tmp';
-    try {
-      await fs.writeFile(temporary, exportChanges(session, selected), { mode: 0o600, flag: constants.O_CREAT | constants.O_WRONLY | constants.O_EXCL });
-      await fs.rename(temporary, outputPath);
-    } finally { await fs.rm(temporary, { force: true }); }
+    await saveOutput(outputPath, exportChanges(session, selected));
     return { count: selected.size, fileName: path.basename(outputPath) };
   });
 }
