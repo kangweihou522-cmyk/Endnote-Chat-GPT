@@ -1,0 +1,40 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run package:win
+      - name: Package and publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = node -p "require('./package.json').version"
+          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Tag must match package version." }
+          $asset = "EndNote-ChatGPT-v$version-Windows-x64.zip"
+          $zip = Join-Path dist $asset
+          Compress-Archive -Path dist/EndNote-ChatGPT-win32-x64 -DestinationPath $zip
+          $digest = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $asset" | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          @(
+            'Windows x64 便携版。解压整个压缩包并双击 EndNote-ChatGPT.exe。'
+            ''
+            '输入论文标题或 DOI，保存 RIS 并查找 PDF 与全文入口。ChatGPT 译名使用已授权账户的可用订阅额度。EndNote 导入时选择 RefMan RIS。'
+          ) | Set-Content -Encoding utf8 dist/release-notes.md
+          gh release create $env:GITHUB_REF_NAME $zip dist/SHA256SUMS.txt --verify-tag --title "EndNote ChatGPT $version" --notes-file dist/release-notes.md
