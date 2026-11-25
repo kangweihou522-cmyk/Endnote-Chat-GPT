@@ -8,11 +8,12 @@ async function invoke(channel, value) {
 
 contextBridge.exposeInMainWorld('endnote', {
   account: () => invoke('auth-status'),
-  login: () => invoke('auth-login'),
+  login: () => ipcRenderer.invoke('auth-login'),
   cancelLogin: () => invoke('auth-cancel'),
-  models: () => invoke('auth-models'),
-  logout: () => invoke('auth-logout'),
+  models: () => ipcRenderer.invoke('auth-models'),
+  logout: () => ipcRenderer.invoke('auth-logout'),
   usage: () => invoke('open-usage'),
+  onAuthStep: handle => { ipcRenderer.on('auth-step', (_, value) => handle(value)); },
   open: () => invoke('open-file'),
   scan: options => invoke('scan-records', options),
   cancel: () => invoke('scan-cancel'),

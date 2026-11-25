@@ -17,28 +17,40 @@ const SCOPES = "openid profile email offline_access resource.invoke chatgpt.toke
 const HOST_PREF = "hostId";
 const ACTIVE_PREF = "activeClient";
 const ALLOWED = new Set([TOKEN, DISCOVERY, JWKS, REVOKE, RESOURCE + "/models", RESOURCE + "/responses"]);
+const STAGES = new Map([
+  [TOKEN, "exchange"], [DISCOVERY, "identity"], [JWKS, "identity"], [REVOKE, "revoke"],
+  [RESOURCE + "/models", "models"], [RESOURCE + "/responses", "generation"]
+]);
 
 function abortError() { const error = new Error("ChatGPT 请求已取消。"); error.name = "AbortError"; return error; }
 function checkAbort(signal) { if (signal?.aborted) throw abortError(); }
+function invalidAccessToken(code) {
+  return ["invalid_token", "token_expired", "token_revoked"].includes(code);
+}
 function errorCode(response) {
-  try { const value = JSON.parse(response.text || "{}"); return String(value.error?.code || value.error || value.code || "").slice(0, 120); }
+  try {
+    const value = JSON.parse(response.text || "{}");
+    const code = value.error?.code || value.error || value.code;
+    return typeof code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(code) ? code : "";
+  }
   catch (_) { return ""; }
 }
-function apiError(code, status) {
-  code = typeof code === "string" && /^[a-z0-9_.:-]{1,120}$/i.test(code) ? code : "chatgpt_request_failed";
-  const error = new Error(
-    /invalid_grant|invalid_refresh_token|token_expired|refresh_token_expired|refresh_token_invalidated|refresh_token_reused/.test(code)
-      ? "ChatGPT 授权已到期或撤销，请重新登录。"
-      : /subscription_sharing_usage_limit_exceeded|rate_limit_exceeded|usage_limit/.test(code) || status === 429
-      ? "ChatGPT 订阅额度或请求频率达到限制。请稍后重试，并在 ChatGPT 设置的 Usage 中检查额度。"
-      : /subscription_sharing_usage_unavailable|insufficient_permissions|access_denied/.test(code) || status === 403
-        ? "当前 ChatGPT 账户未允许此应用使用订阅额度，或所选模型不可用。请检查官方授权和应用额度设置。"
-        : status === 401 ? "ChatGPT 登录已失效，请重新登录。"
-          : "ChatGPT 官方服务请求失败" + (status ? `（HTTP ${status}）` : "") + "，请稍后重试。"
-  );
-  error.code = code || "chatgpt_request_failed";
-  error.status = status || 0;
-  return error;
+function responseError(response, code = errorCode(response)) {
+  const { status, stage, webpage, requestId } = response;
+  code = typeof code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(code) ? code : "";
+  let message = "ChatGPT 官方服务请求失败，请查看下方诊断。";
+  if (webpage) message = "软件收到了网页响应，无法继续连接 OpenAI。请检查桌面软件使用的网络连接。";
+  else if (code === "access_denied" && stage === "browser") message = "浏览器端授权未获批准。";
+  else if (code === "invalid_grant" && stage === "exchange") message = "本次授权码已失效。请从软件重新发起登录。";
+  else if (/^(?:invalid_grant|invalid_refresh_token|token_expired|refresh_token_expired|refresh_token_invalidated|refresh_token_reused)$/.test(code)) message = "ChatGPT 授权已到期或撤销，请重新登录。";
+  else if (code === "unsupported_country_region_territory" || status === 451) message = "OpenAI 返回了地区访问限制。";
+  else if (status === 429 || /usage_limit|rate_limit_exceeded/.test(code)) message = "ChatGPT 套餐额度或请求频率达到限制。可在 ChatGPT 用量设置检查此应用的额度。";
+  else if (code === "subscription_sharing_user_not_eligible") message = "OpenAI 暂未向此账号或工作区开放本应用的套餐额度。";
+  else if (status === 503) message = "OpenAI 服务暂时不可用，可以稍后重试。";
+  else if (status === 403) message = "OpenAI 拒绝了此步骤的请求。请查看下方诊断。";
+  else if (status === 401) message = invalidAccessToken(code) ? "ChatGPT 登录凭据已失效，请重新登录。" :
+    "OpenAI 未接受此步骤的授权。可查看诊断，或在软件中重新连接。";
+  return Object.assign(new Error(message), { code, status, stage, webpage, requestId });
 }
 function base64url(bytes) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -146,14 +158,16 @@ function create(deps) {
     const signal = options.signal ? AbortSignal.any([options.signal, operation.signal]) : operation.signal;
     const cancel = () => operation.abort();
     requests.add(cancel);
-    try { return await request({ ...options, signal }); }
+    const stage = options.stage || STAGES.get(options.url);
+    try { return { ...await request({ ...options, signal }), stage }; }
+    catch (error) { error.stage ||= stage; throw error; }
     finally { requests.delete(cancel); }
   }
   async function jsonRequest(url, options = {}) {
     const response = await send({ url, ...options });
-    if (response.status < 200 || response.status >= 300) throw apiError(errorCode(response), response.status);
+    if (response.status < 200 || response.status >= 300 || response.webpage) throw responseError(response);
     try { return JSON.parse(response.text); }
-    catch (_) { throw new Error("ChatGPT 官方服务返回了无效的 JSON。"); }
+    catch (_) { throw responseError(response); }
   }
   async function discovery(signal) {
     if (discoveryCache && discoveryCache.until > clock()) return discoveryCache.value;
@@ -213,7 +227,7 @@ function create(deps) {
     preferences.set(ACTIVE_PREF, accountID); return status();
   }
   async function clearRejectedCredentials(record, error, expectedEpoch) {
-    if (error?.status !== 401) return;
+    if (error?.status !== 401 || error.webpage || !invalidAccessToken(error.code)) return;
     const current = await selected(record.client_id);
     if (epoch(record.client_id) === expectedEpoch && current?.access_token === record.access_token) { blockedAccounts.add(record.client_id); await store.put(withoutTokens(current)); }
   }
@@ -224,6 +238,7 @@ function create(deps) {
     if (pendingLogin) throw new Error("已有 ChatGPT 登录正在进行，请先完成或取消。");
     const attempt = { cancelled: false, callback: null, close() { this.cancelled = true; this.callback?.close(); } };
     pendingLogin = attempt;
+    let stage = "browser";
     try {
       const record = options.newAccount ? null : await selected(options.accountId);
       if (record && signingOut.has(record.client_id)) throw new Error("该 ChatGPT 账户正在退出，请稍后重新登录。");
@@ -241,20 +256,26 @@ function create(deps) {
       if (record?.id_token) params.id_token_hint = record.id_token;
       if (record?.email) params.login_hint = record.email;
       for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-      options.onStatus?.("请在官方浏览器页面登录并授权，完成后返回 Zotero。");
+      options.onStep?.(stage);
       // Never log this URL: returning sign-in can contain an ID-token hint.
       await launchURL(url.href);
       const returned = new URL(await callback.result);
       checkAbort(options.signal);
       if (returned.origin !== new URL(callback.redirectUri).origin || returned.pathname !== "/auth/callback" || returned.searchParams.get("state") !== state) throw new Error("ChatGPT 登录状态校验失败，请重新登录。");
-      if (returned.searchParams.has("error")) throw apiError(returned.searchParams.get("error"), 403);
+      if (returned.searchParams.has("error")) throw responseError({ stage }, returned.searchParams.get("error"));
       const issued = returned.searchParams.get("client_id") || record?.client_id;
       const code = returned.searchParams.get("code");
       if (!issued || issued === "dynamic_agent_client" || !code || (record && issued !== record.client_id)) throw new Error("ChatGPT 客户端注册未完成或不匹配，请重新登录。");
+      stage = "exchange";
+      options.onStep?.(stage);
       const tokens = await jsonRequest(TOKEN, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form({ grant_type: "authorization_code", client_id: issued, code, code_verifier: verifier, redirect_uri: callback.redirectUri, resource: RESOURCE }), signal: options.signal });
+      stage = "identity";
+      options.onStep?.(stage);
       const claims = await validateIdToken(tokens.id_token, issued, nonce, record?.subject, options.signal);
       const scopes = String(tokens.scope || "").split(/\s+/).filter(Boolean);
-      if (!scopes.includes("chatgpt.tokens.use.direct") || !scopes.includes("resource.invoke")) throw new Error("已登录 ChatGPT，但未授权此应用使用订阅额度。请在官方授权页面允许后重试。");
+      if (!scopes.includes("chatgpt.tokens.use.direct") || !scopes.includes("resource.invoke")) {
+        throw Object.assign(new Error("账号身份已验证。OpenAI 未授权此应用使用套餐额度。"), { stage: "permissions", code: "plan_scope_missing" });
+      }
       if (tokens.token_type?.toLowerCase() !== "bearer" || !tokens.access_token || !tokens.refresh_token || !Number.isFinite(Number(tokens.expires_in)) || Number(tokens.expires_in) <= 0) throw new Error("ChatGPT 未返回完整的订阅授权凭据，请重新登录。");
       const saved = { client_id: issued, issuer: AUTH, subject: claims.sub, email: typeof claims.email === "string" ? claims.email : "", ext_agent_host_id: hostID, nonce, access_token: tokens.access_token, refresh_token: tokens.refresh_token, id_token: tokens.id_token, scopes, expires_at: clock() + Number(tokens.expires_in) * 1000 };
       checkAbort(options.signal);
@@ -265,6 +286,7 @@ function create(deps) {
       invalidate(issued);
       const commitEpoch = epoch(issued);
       blockedAccounts.add(issued);
+      stage = "storage";
       await store.put(saved);
       if (attempt.cancelled || disposed || options.signal?.aborted || signingOut.has(issued) || epoch(issued) !== commitEpoch) {
         const current = await selected(issued);
@@ -274,6 +296,9 @@ function create(deps) {
       blockedAccounts.delete(issued);
       preferences.set(ACTIVE_PREF, issued);
       return status();
+    } catch (error) {
+      error.stage ||= stage;
+      throw error;
     } finally { attempt.callback?.close(); if (pendingLogin === attempt) pendingLogin = null; }
   }
 
@@ -313,14 +338,14 @@ function create(deps) {
     if (!record.refresh_token) throw new Error("ChatGPT 登录已到期，请重新登录。");
     if (!refreshes.has(record.client_id)) {
       const refreshing = (async () => {
-        const response = await send({ url: TOKEN, method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form({ grant_type: "refresh_token", client_id: record.client_id, refresh_token: record.refresh_token, resource: RESOURCE }), signal });
-        if (response.status < 200 || response.status >= 300) {
+        const response = await send({ url: TOKEN, stage: "refresh", method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: form({ grant_type: "refresh_token", client_id: record.client_id, refresh_token: record.refresh_token, resource: RESOURCE }), signal });
+        if (response.status < 200 || response.status >= 300 || response.webpage) {
           const code = errorCode(response);
           if (/invalid_grant|invalid_refresh_token|token_expired|refresh_token_expired|refresh_token_invalidated|refresh_token_reused/.test(code)) {
             const current = await selected(record.client_id);
             if (epoch(record.client_id) === expectedEpoch && current?.refresh_token === record.refresh_token) { blockedAccounts.add(record.client_id); await store.put(withoutTokens(current)); }
           }
-          throw apiError(code, response.status);
+          throw responseError(response, code);
         }
         let tokens; try { tokens = JSON.parse(response.text); } catch (_) { throw new Error("ChatGPT 刷新响应无效，请稍后重试。"); }
         const scopes = tokens.scope === undefined ? record.scopes : String(tokens.scope).split(/\s+/).filter(Boolean);
@@ -370,13 +395,13 @@ function create(deps) {
         const finalText = event.response?.output?.filter(item => item.type === "message").flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text || "").join("");
         if (finalText) text = finalText;
       } else if (event.type === "response.failed" || event.type === "error") {
-        streamedError = apiError(event.response?.error?.code || event.error?.code || event.code || "response_failed", event.response?.error?.code?.includes("usage_limit") ? 429 : 0);
+        streamedError = responseError({ stage: "generation" }, event.response?.error?.code || event.error?.code || event.code || "response_failed");
         throw streamedError;
       } else if (event.type === "response.incomplete") throw new Error("ChatGPT 生成不完整，请减少材料或重试。");
     });
     const response = await send({ url: RESOURCE + "/responses", method: "POST", headers: { Authorization: "Bearer " + record.access_token, "Content-Type": "application/json" }, body: JSON.stringify({ model, instructions, input, store: false, stream: true }), signal, timeoutMs, onChunk: chunk => { receivedChunks = true; parser.push(chunk); } });
-    if (response.status < 200 || response.status >= 300) {
-      const error = apiError(errorCode(response), response.status);
+    if (response.status < 200 || response.status >= 300 || response.webpage) {
+      const error = responseError(response);
       await clearRejectedCredentials(record, error, expectedEpoch); throw error;
     }
     // Injected transports follow the same chunk contract. A response with no

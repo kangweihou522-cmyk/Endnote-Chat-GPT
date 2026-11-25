@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, safeStorage, shell, clipboard, net } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { constants } = require('node:fs');
@@ -15,6 +15,11 @@ const { findFullText } = require('./fulltext.cjs');
 const ENTRY = path.join(__dirname, 'index.html');
 const ALLOWED_LANGUAGES = ['Simplified Chinese', 'English'];
 const MAX_XML = 50 * 1024 * 1024;
+const AUTH_STEPS = {
+  browser: '浏览器授权', exchange: '交换授权令牌', identity: '验证账号身份',
+  permissions: '检查套餐权限', storage: '保存本机授权', models: '读取模型目录',
+  refresh: '刷新授权令牌', generation: '请求 ChatGPT 模型', revoke: '撤销授权'
+};
 
 let window;
 let auth;
@@ -47,8 +52,25 @@ function register(channel, handler) {
       throw new Error('无效的应用窗口。');
     }
     try { return { ok: true, value: await handler(...args) }; }
-    catch (error) { return { ok: false, error: error.message || '操作失败。' }; }
+    catch (error) {
+      return {
+        ok: false, error: error.message || '操作失败。',
+        diagnostic: describeAuthFailure(error)
+      };
+    }
   });
+}
+
+function describeAuthFailure(error) {
+  if (!Object.hasOwn(AUTH_STEPS, error.stage)) return '';
+  return [
+    AUTH_STEPS[error.stage],
+    Number.isInteger(error.status) && error.status >= 100 && error.status < 600 ? 'HTTP ' + error.status : '',
+    error.webpage ? '返回网页' : '',
+    /^[a-z][a-z0-9_]{0,79}$/.test(error.code || '') ? error.code : '',
+    /^ERR_[A-Z_]{1,80}$/.test(error.networkCode || '') ? error.networkCode : '',
+    /^req_[A-Za-z0-9_-]{1,96}$/.test(error.requestId || '') ? error.requestId : ''
+  ].filter(Boolean).join(' · ');
 }
 
 function emit(channel, value) {
@@ -73,7 +95,8 @@ function accountState() {
 
 async function renewCatalog(signal) {
   catalog = [];
-  catalog = await auth.listModels({ signal });
+  try { catalog = await auth.listModels({ signal }); }
+  catch (error) { error.stage ||= 'models'; throw error; }
   return accountState();
 }
 
@@ -249,7 +272,7 @@ function registerRisHandlers() {
         if (translated) setTranslation(pending.field, translated);
       } catch (error) {
         signal.throwIfAborted();
-        job.aiWarning = error.message;
+        job.aiWarning = [error.message, describeAuthFailure(error)].filter(Boolean).join(' · ');
       }
     })() : null;
     await Promise.all([pdf, ai]);
@@ -286,7 +309,8 @@ function registerHandlers() {
     login = new AbortController();
     catalog = [];
     try {
-      await auth.login({ signal: login.signal });
+      await auth.login({ signal: login.signal, onStep: step => emit('auth-step', step) });
+      emit('auth-step', 'models');
       return await renewCatalog(login.signal);
     } finally { login = null; }
   });
@@ -402,7 +426,7 @@ else {
   });
   app.whenReady().then(() => {
     Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]) : null);
-    auth = createDesktopAuth({ shell, safeStorage, userData: app.getPath('userData') });
+    auth = createDesktopAuth({ shell, safeStorage, userData: app.getPath('userData'), http: net.fetch });
     registerHandlers();
     return createWindow();
   }).catch(error => {

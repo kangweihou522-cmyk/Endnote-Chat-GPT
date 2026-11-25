@@ -10,6 +10,13 @@ Windows 文献工作站。输入期刊论文标题或 DOI，核对原始书目�
 4. 点击 **保存 RIS**。在 EndNote 选择 **File → Import → File**，选择该文件，**Import Option** 选 **RefMan RIS**。中文字符显示异常时，可将 **Text Translation** 设为 UTF-8 再导入。 [Clarivate RefMan RIS 过滤器](https://endnote.com/downloads/filters/refman-ris/)
 5. 在 **PDF 与全文** 区打开或复制链接。资料库收录免费的 PDF 直链时优先显示。出版社登记的 PDF 可能需要个人或机构订阅。检测到 PubMed Central 全文时会提供对应文章页。
 
+## ChatGPT 连接状态
+
+浏览器显示「授权结果已送回软件」后，切回 EndNote ChatGPT，等软件显示可选模型。授权请求使用系统网络设置。
+
+- 显示「ChatGPT 已授权 · 模型待连接」时，可以点「刷新模型」重试读取。
+- 若出现错误，连接面板会显示失败步骤，以及服务提供的 HTTP 状态、错误代码和请求编号。反馈问题时可直接复制面板里的诊断文字。浏览器回调地址包含一次性授权码，回传成功后页面会清除地址栏中的参数。
+
 ## 字段与来源
 
 - Crossref 和 PubMed 提供原文题名、作者、期刊全称、卷期、页码或文章编号、年份、日期、DOI 和 ISSN。未收录的字段留空，有冲突的字段待手动确认。作者全名取决于来源提供的姓名信息。

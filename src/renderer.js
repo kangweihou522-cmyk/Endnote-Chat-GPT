@@ -63,16 +63,18 @@ function sync() {
 
 function activeAccount(state, applyDefault = false) {
   accountConnected = state.connected;
-  byId('account-summary').textContent = state.connected ? 'ChatGPT 已授权' : '连接 ChatGPT';
+  hasModels = state.connected && state.models.length > 0;
+  byId('account-summary').textContent = hasModels ? 'ChatGPT 已授权' :
+    state.connected ? 'ChatGPT 已授权 · 模型待连接' : '连接 ChatGPT';
   byId('account-status').textContent = state.message || (state.connected ?
-    '已授权 ChatGPT 订阅额度' + (state.email ? ' · ' + state.email.replace(/ · \d+$/, '') : '') :
+    (hasModels ? '已授权 ChatGPT 订阅额度' + (state.email ? ' · ' + state.email.replace(/ · \d+$/, '') : '') :
+      '账号已授权。可点击「刷新模型」读取可用模型。') :
     '登录 OpenAI 并授权使用你的 ChatGPT 套餐。');
   byId('login').textContent = state.connected ? '重新连接' : 'Continue with ChatGPT';
   byId('logout').hidden = !state.connected;
   byId('models').hidden = !state.connected;
   const previous = model.value;
   model.replaceChildren(...state.models.map(item => new Option(item.name, item.id)));
-  hasModels = state.connected && state.models.length > 0;
   if (!hasModels) model.add(new Option(state.connected ? '请刷新账户模型' : '请先登录', ''));
   else if (state.models.some(item => item.id === previous)) model.value = previous;
   if (!hasModels || applyDefault) translate.checked = hasModels;
@@ -81,18 +83,26 @@ function activeAccount(state, applyDefault = false) {
 
 async function accountOperation(action) {
   accountBusy = action;
+  const diagnostic = byId('account-diagnostic');
+  diagnostic.hidden = true;
+  diagnostic.textContent = '';
   if (action === 'login') {
     byId('login').textContent = '取消登录';
     byId('account-status').textContent = '请在默认浏览器中完成 OpenAI 登录并授权，然后返回此窗口。';
-  }
+  } else if (action === 'models') byId('account-status').textContent = '正在读取可用模型…';
   sync();
   try {
-    const state = await api[action]();
-    activeAccount(state, action === 'login' || (!hasModels && action === 'models'));
+    const result = await api[action]();
+    if (!result.ok) throw Object.assign(new Error(result.error), { diagnostic: result.diagnostic });
+    activeAccount(result.value, action === 'login' || (!hasModels && action === 'models'));
   } catch (error) {
     const state = await api.account().catch(() => null);
     if (state) activeAccount(state);
     byId('account-status').textContent = error.message;
+    if (error.diagnostic) {
+      diagnostic.textContent = error.diagnostic;
+      diagnostic.hidden = false;
+    }
   } finally {
     accountBusy = '';
     byId('login').textContent = accountConnected ? '重新连接' : 'Continue with ChatGPT';
@@ -100,6 +110,16 @@ async function accountOperation(action) {
     renderReview();
   }
 }
+
+api.onAuthStep(step => {
+  if (accountBusy !== 'login') return;
+  const status = {
+    exchange: '已收到浏览器回传，正在交换授权令牌…',
+    identity: '正在验证 ChatGPT 账号身份…',
+    models: '账号已授权，正在读取可用模型…'
+  }[step];
+  if (status) byId('account-status').textContent = status;
+});
 
 function rowState(index) {
   const row = rows.get(index);

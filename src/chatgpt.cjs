@@ -1,5 +1,5 @@
 const { createServer } = require('node:http');
-const { randomUUID, timingSafeEqual } = require('node:crypto');
+const { randomBytes, randomUUID, timingSafeEqual } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { create, constants } = require('./vendor/chatgpt-plan.cjs');
@@ -23,13 +23,23 @@ async function openCallback({ state, signal, timeoutMs }) {
       request.headers.host === '127.0.0.1:' + server.address()?.port &&
       callback?.origin === new URL(redirectUri).origin && callback?.pathname === '/auth/callback' &&
       returnedState.length === expected.length && timingSafeEqual(returnedState, expected);
-    response.writeHead(valid ? 200 : 400, {
-      'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
-      'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'",
-      Connection: 'close'
+    const headers = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', Connection: 'close' };
+    if (!valid) {
+      response.writeHead(400, { ...headers, 'Content-Type': 'text/plain; charset=utf-8' });
+      response.end('无法验证授权回调。');
+      return;
+    }
+    const nonce = randomBytes(18).toString('base64');
+    response.writeHead(200, {
+      ...headers,
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Security-Policy': `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'`
     });
-    response.end(valid ? '已收到授权结果。请返回 EndNote ChatGPT 查看连接状态。' : '无法验证授权回调。');
-    if (valid) finish(null, callback.href);
+    response.end(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>EndNote ChatGPT 授权回传</title>
+<script nonce="${nonce}">history.replaceState(null, "", "/auth/received");</script>
+<h1>浏览器授权结果已送回软件</h1>
+<p>请切回 EndNote ChatGPT。软件会验证授权并读取模型。连接状态以软件窗口为准。</p></html>`);
+    finish(null, callback.href);
   });
   server.headersTimeout = 8000;
   server.requestTimeout = 10000;
@@ -61,13 +71,14 @@ async function openCallback({ state, signal, timeoutMs }) {
   return { redirectUri, result, close: abort };
 }
 
-async function officialRequest({ url, method = 'GET', body, headers, signal, timeoutMs = 25000, onChunk }) {
+async function officialRequest(http, { url, method = 'GET', body, headers, signal, timeoutMs = 25000, onChunk }) {
   const limit = 8 * 1024 * 1024;
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
-    const response = await fetch(url, {
+    const response = await http(url, {
       method, body, headers: { Accept: onChunk ? 'text/event-stream' : 'application/json', ...headers },
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout, redirect: 'error', cache: 'no-store'
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      credentials: 'omit', redirect: 'error', cache: 'no-store'
     });
     let text = '';
     const decoder = new TextDecoder();
@@ -91,11 +102,20 @@ async function officialRequest({ url, method = 'GET', body, headers, signal, tim
         await reader.cancel().catch(() => {});
       }
     }
-    return { status: response.status, text };
+    return {
+      status: response.status, text,
+      webpage: /^text\/html\b/i.test(response.headers.get('content-type') || ''),
+      requestId: response.headers.get('x-request-id')
+    };
   } catch (error) {
     if (signal?.aborted) throw new Error('已取消 ChatGPT 请求。');
     if (timeout.aborted) throw new Error('ChatGPT 请求超时。');
-    if (error instanceof TypeError) throw new Error('无法连接 ChatGPT 官方服务。请检查网络后重试。');
+    const networkCode = error?.message?.match(/\bnet::(ERR_[A-Z_]{1,80})\b/)?.[1];
+    if (networkCode || error instanceof TypeError) {
+      const failure = new Error('无法连接 OpenAI 官方服务。请检查网络后重试。');
+      failure.networkCode = networkCode;
+      throw failure;
+    }
     throw error;
   }
 }
@@ -110,14 +130,16 @@ function replaceFile(destination, bytes) {
   }
 }
 
-function createDesktopAuth({ shell, safeStorage, userData }) {
+function createDesktopAuth({ shell, safeStorage, userData, http }) {
   fs.mkdirSync(userData, { recursive: true, mode: 0o700 });
   const settingsFile = path.join(userData, 'chatgpt-client.json');
   const tokenFile = path.join(userData, 'chatgpt-credentials.enc');
 
   function requireSecureStorage() {
     if (!safeStorage.isEncryptionAvailable() || (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text')) {
-      throw new Error('系统安全凭据存储不可用。请启用系统钥匙串后再登录 ChatGPT。');
+      const error = new Error('系统安全凭据存储不可用。请启用系统钥匙串后再登录 ChatGPT。');
+      error.stage = 'storage';
+      throw error;
     }
   }
 
@@ -148,7 +170,7 @@ function createDesktopAuth({ shell, safeStorage, userData }) {
     get: key => settings()[key],
     set: (key, value) => replaceFile(settingsFile, JSON.stringify({ ...settings(), [key]: value }))
   };
-  const auth = create({ store, preferences, request: officialRequest, openCallback, launchURL: raw => {
+  const auth = create({ store, preferences, request: options => officialRequest(http, options), openCallback, launchURL: raw => {
     const url = new URL(raw);
     if (url.origin + url.pathname !== constants.AUTHORIZE) throw new Error('无效的 ChatGPT 官方授权地址。');
     return shell.openExternal(url.href);
@@ -215,4 +237,4 @@ async function suggestCandidate(auth, record, candidates, model, signal) {
   return { index: output.index, reason: clean(output.reason) };
 }
 
-module.exports = { createDesktopAuth, openCallback, translateTitles, suggestCandidate };
+module.exports = { createDesktopAuth, openCallback, officialRequest, translateTitles, suggestCandidate };

@@ -39,6 +39,7 @@ function harness(options={}) {
         if(settings.refreshThrow)throw new Error('network unavailable');
         return json({access_token:'REFRESHED_ACCESS_SECRET',refresh_token:'ROTATED_REFRESH_SECRET',token_type:'Bearer',expires_in:3600,...settings.refreshResponse});
       }
+      if(settings.exchangeResponse)return settings.exchangeResponse;
       if(settings.tokenError)return json({error:settings.tokenError},400);
       const clientID=form.get('client_id');
       const claims={iss:C.AUTH,aud:clientID,exp:Math.floor(now/1000)+3600,iat:Math.floor(now/1000),sub:settings.subject||'verified-subject',email:'tester@example.test',nonce:authURL.searchParams.get('nonce'),...settings.claims};
@@ -47,7 +48,13 @@ function harness(options={}) {
       return json({access_token:'ACCESS_SECRET',refresh_token:'REFRESH_SECRET',id_token:token,token_type:'Bearer',expires_in:3600,scope:C.SCOPES,...settings.tokenResponse});
     }
     if(req.url===C.REVOKE){if(settings.beforeRevoke)await settings.beforeRevoke();if(settings.revokeThrow)throw new Error('offline');return {status:settings.revokeStatus||200,text:''};}
-    if(req.url===C.RESOURCE+'/models')return json({models:[{visibility:'list',slug:'account-model',display_name:'Account Model'},{visibility:'hide',slug:'hidden-model'}]},settings.modelsStatus||200);
+    if(req.url===C.RESOURCE+'/models'){
+      if(settings.modelsStatus)return {
+        ...json({error:{code:settings.modelsCode}},settings.modelsStatus),
+        requestId:'req_test_models'
+      };
+      return json({models:[{visibility:'list',slug:'account-model',display_name:'Account Model'},{visibility:'hide',slug:'hidden-model'}]});
+    }
     if(req.url===C.RESOURCE+'/responses'){
       const text=settings.generated||'{"tags":["本地文献"],"note":"简记"}';
       const data=settings.streamData===undefined?stream(text,settings.complete!==false):settings.streamData;
@@ -149,11 +156,39 @@ test('model picker uses official account catalog visibility and slug fields',asy
   assert.equal(call.headers.Authorization,'Bearer ACCESS_SECRET');
 });
 
-test('revoked access returning HTTP 401 clears the unusable login without discarding account mapping',async()=>{
-  const h=harness({modelsStatus:401});await h.api.login();
-  await assert.rejects(h.api.listModels(),/登录已失效/);
+test('explicitly rejected access tokens clear the unusable login without discarding the account mapping',async()=>{
+  const h=harness({modelsStatus:401,modelsCode:'invalid_token'});await h.api.login();
+  await assert.rejects(h.api.listModels(),{stage:'models',status:401,code:'invalid_token'});
   assert.equal((await h.api.status()).connected,false);
   assert.equal(h.records.get('oaiapp_test_client').subject,'verified-subject');
+});
+
+test('a 403 HTML response after browser consent diagnoses code exchange and saves no tokens', async () => {
+  const h = harness({ exchangeResponse: {
+    status: 403, webpage: true, text: '<html>sample response</html>', requestId: 'req_exchange_test'
+  } });
+  const steps = [];
+  await assert.rejects(h.api.login({ onStep: step => steps.push(step) }), {
+    stage: 'exchange', status: 403, webpage: true, requestId: 'req_exchange_test'
+  });
+  assert.deepEqual(steps, ['browser', 'exchange']);
+  assert.equal((await h.api.status()).connected, false);
+  assert.equal(h.records.size, 0);
+  assert.equal(h.calls.filter(call => call.url === C.TOKEN).length, 1);
+});
+
+test('the model directory may fail independently and can be retried without reauthorization', async () => {
+  for (const [status, code] of [[403, 'subscription_sharing_user_not_eligible'], [401, 'subscription_sharing_invalid_user']]) {
+    const h = harness({ modelsStatus: status, modelsCode: code });
+    const steps = [];
+    await h.api.login({ onStep: step => steps.push(step) });
+    assert.deepEqual(steps, ['browser', 'exchange', 'identity']);
+    await assert.rejects(h.api.listModels(), { stage: 'models', status, code, requestId: 'req_test_models' });
+    assert.equal((await h.api.status()).connected, true);
+    h.settings.modelsStatus = null;
+    assert.deepEqual(await h.api.listModels(), [{ id: 'account-model', name: 'Account Model' }]);
+    assert.equal(h.calls.filter(call => call.url === C.TOKEN).length, 1);
+  }
 });
 
 test('streaming Responses sends only supported plan parameters and waits for completion',async()=>{
