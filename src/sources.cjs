@@ -4,7 +4,7 @@ const { clean, sourceText, normalizeDoi, normalizePmid, normalizeIssns, formatAu
 
 const CROSSREF = 'https://api.crossref.org';
 const PUBMED = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
-const AGENT = 'EndNote-ChatGPT/0.1 (https://github.com/kangweihou522-cmyk/Endnote-Chat-GPT)';
+const AGENT = 'EndNote-ChatGPT (https://github.com/kangweihou522-cmyk/Endnote-Chat-GPT)';
 const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.toLowerCase().split(' ');
 const LIMIT = 6;
 
@@ -27,6 +27,22 @@ function dates(publication, online = [], kind = 'issue') {
   };
 }
 
+function validOrcid(value) {
+  const id = clean(value).replace(/^https?:\/\/(?:www\.)?orcid\.org\//i, '').toUpperCase();
+  if (!/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(id)) return '';
+  const digits = id.replace(/-/g, '');
+  const total = [...digits.slice(0, -1)].reduce((sum, digit) => (sum + Number(digit)) * 2, 0);
+  return '0123456789X'[(12 - total % 11) % 11] === digits.at(-1) ? 'https://orcid.org/' + id : '';
+}
+
+function attributed(name, value) {
+  return value ? [name, value].filter(Boolean).join(' — ') : '';
+}
+
+function supplementOf(issue) {
+  return clean(issue).match(/\b(?:Suppl(?:ement)?\.?|Pt\.?)\s*[\w-]*/i)?.[0]?.trim() || '';
+}
+
 function crossrefWork(work) {
   if (work?.type !== 'journal-article') return null;
   const doi = normalizeDoi(work.DOI);
@@ -40,17 +56,31 @@ function crossrefWork(work) {
   const print = articlePrint.length ? articlePrint : issuePrint;
   const online = parts('published-online');
   const general = parts('published').length ? parts('published') : parts('issued');
+  const authors = (work.author || []).map(item => ({
+    name: formatAuthor({
+      family: clean(item.family), given: clean(item.given), suffix: clean(item.suffix),
+      collective: clean(item.name)
+    }),
+    affiliations: (item.affiliation || []).map(entry => clean(entry.name)).filter(Boolean),
+    orcid: validOrcid(item.ORCID)
+  }));
+  const abbreviations = (work['short-container-title'] || []).map(sourceText).filter(Boolean);
+  const issue = clean(work.issue || work['journal-issue']?.issue);
+  const articleNumber = clean(work['article-number']);
+  const typedIssn = type => normalizeIssns((work['issn-type'] || [])
+    .filter(item => item.type === type).map(item => item.value))[0] || '';
   return {
     source: 'Crossref', url: 'https://doi.org/' + encodeURI(doi).replace(/[?#]/g, encodeURIComponent),
     title, otherTitle: original && original !== depositedTitle ? depositedTitle : '',
-    translationLanguage: '', authors: (work.author || []).map(author => formatAuthor({
-      family: clean(author.family), given: clean(author.given), suffix: clean(author.suffix),
-      collective: clean(author.name)
-    })).filter(Boolean),
-    journal: sourceText(work['container-title']?.[0]),
-    abbreviations: (work['short-container-title'] || []).map(sourceText).filter(Boolean),
-    volume: clean(work.volume), issue: clean(work.issue || work['journal-issue']?.issue),
-    pages: clean(work.page || work['article-number']), doi, pmid: '',
+    translationLanguage: '', authors: authors.map(author => author.name).filter(Boolean),
+    journal: sourceText(work['container-title']?.[0]), abbreviations, journalAbbr: abbreviations[0] || '',
+    publisher: clean(work.publisher), volume: clean(work.volume), issue, supplement: supplementOf(issue),
+    pages: clean(work.page || articleNumber), articleNumber, doi, pmid: '',
+    abstract: sourceText(work.abstract),
+    language: [clean(work.language)].filter(Boolean),
+    affiliations: authors.flatMap(author => author.affiliations.map(value => attributed(author.name, value))),
+    orcids: authors.map(author => attributed(author.name, author.orcid)).filter(Boolean),
+    printIssn: typedIssn('print'), onlineIssn: typedIssn('electronic'),
     pdfUrls: (work.link || []).filter(link => /^application\/pdf(?:$|;)/i.test(link['content-type'] || ''))
       .map(link => clean(link.URL)).filter(Boolean),
     issns: normalizeIssns([...(work.ISSN || []), ...(work['issn-type'] || []).map(item => item.value)]),
@@ -79,10 +109,15 @@ function parsePubmed(text) {
     const englishTitle = value(article, 'ArticleTitle');
     const original = value(article, 'VernacularTitle');
     const title = original || englishTitle;
-    const authors = elements(find(article, 'AuthorList'), 'Author').map(author => formatAuthor({
-      family: value(author, 'LastName'), given: value(author, 'ForeName') || value(author, 'Initials'),
-      suffix: value(author, 'Suffix'), collective: value(author, 'CollectiveName')
-    })).filter(Boolean);
+    const authors = elements(find(article, 'AuthorList'), 'Author').map(author => ({
+      name: formatAuthor({
+        family: value(author, 'LastName'), given: value(author, 'ForeName') || value(author, 'Initials'),
+        suffix: value(author, 'Suffix'), collective: value(author, 'CollectiveName')
+      }),
+      affiliations: elements(author, 'AffiliationInfo').map(item => value(item, 'Affiliation')).filter(Boolean),
+      orcids: elements(author, 'Identifier').filter(item => /orcid/i.test(item.getAttribute('Source') || ''))
+        .map(item => validOrcid(item.textContent)).filter(Boolean)
+    }));
     const electronic = elements(article, 'ArticleDate').find(item => item.getAttribute('DateType') === 'Electronic')
       || elements(find(pubmed, 'History'), 'PubMedPubDate').find(item => item.getAttribute('PubStatus') === 'epublish');
     const issueDate = dateParts([value(pubDate, 'Year'), value(pubDate, 'Month'), value(pubDate, 'Day')]);
@@ -93,17 +128,37 @@ function parsePubmed(text) {
     const firstPage = value(pagination, 'StartPage');
     const lastPage = value(pagination, 'EndPage');
     const pageRange = firstPage && lastPage ? firstPage + '-' + lastPage : '';
+    const abbreviated = [value(medline, 'MedlineJournalInfo', 'MedlineTA'), value(journal, 'ISOAbbreviation')].filter(Boolean);
+    const issn = find(journal, 'ISSN');
+    const issued = value(issue, 'Issue');
+    const abstract = elements(find(article, 'Abstract'), 'AbstractText').map(part => {
+      const body = clean(part.textContent);
+      const label = clean(part.getAttribute('Label'));
+      return body && label && !body.toLowerCase().startsWith(label.toLowerCase() + ':') ? label + ': ' + body : body;
+    }).filter(Boolean).join('\n');
+    const texts = (node, tag) => elements(node, tag).map(item => clean(item.textContent)).filter(Boolean);
     return {
       source: 'PubMed', url: pmid ? 'https://pubmed.ncbi.nlm.nih.gov/' + pmid + '/' : '',
       pmid, doi, pmcid: clean(identifiers.find(id => id.getAttribute('IdType') === 'pmc')?.textContent),
       title, otherTitle: original ? englishTitle.replace(/^\[(.*)\]\.?$/u, '$1') : '',
       translationLanguage: original && englishTitle ? 'English' : '',
-      authors, journal: value(journal, 'Title'),
-      abbreviations: [value(journal, 'ISOAbbreviation'), value(medline, 'MedlineJournalInfo', 'MedlineTA')].filter(Boolean),
-      volume: value(issue, 'Volume'), issue: value(issue, 'Issue'),
+      authors: authors.map(author => author.name).filter(Boolean), journal: value(journal, 'Title'),
+      abbreviations: abbreviated, journalAbbr: abbreviated[0] || '',
+      volume: value(issue, 'Volume'), issue: issued, supplement: supplementOf(issued),
       pages: pageRange || value(pagination, 'MedlinePgn') || firstPage ||
         clean(locations.find(id => id.getAttribute('EIdType') === 'pii')?.textContent),
       issns: normalizeIssns([value(journal, 'ISSN'), value(medline, 'MedlineJournalInfo', 'ISSNLinking')]),
+      printIssn: issn?.getAttribute('IssnType') === 'Print' ? normalizeIssns([issn.textContent])[0] || '' : '',
+      onlineIssn: issn?.getAttribute('IssnType') === 'Electronic' ? normalizeIssns([issn.textContent])[0] || '' : '',
+      abstract, keywords: elements(medline, 'KeywordList').flatMap(list => texts(list, 'Keyword')),
+      mesh: elements(find(medline, 'MeshHeadingList'), 'MeshHeading').map(heading => {
+        const descriptor = value(heading, 'DescriptorName');
+        return [descriptor, ...texts(heading, 'QualifierName')].filter(Boolean).join('/');
+      }).filter(Boolean),
+      language: texts(article, 'Language'),
+      publicationTypes: texts(find(article, 'PublicationTypeList'), 'PublicationType'),
+      affiliations: authors.flatMap(author => author.affiliations.map(value => attributed(author.name, value))),
+      orcids: authors.flatMap(author => author.orcids.map(value => attributed(author.name, value))),
       ...dates(year, online)
     };
   }).filter(work => work.pmid && work.title);

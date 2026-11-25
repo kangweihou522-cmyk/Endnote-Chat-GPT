@@ -1,7 +1,7 @@
 {
   "name": "endnote-chatgpt",
   "productName": "EndNote ChatGPT",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "Check and complete EndNote journal articles with Crossref, PubMed and ChatGPT plan usage.",
   "main": "src/main.cjs",
@@ -15,7 +15,10 @@
   },
   "dependencies": {
     "@xmldom/xmldom": "0.9.12",
-    "entities": "9.0.0"
+    "citeproc": "2.4.63",
+    "entities": "9.0.0",
+    "html-to-text": "10.0.1",
+    "sanitize-html": "2.18.2"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0",

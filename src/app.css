@@ -139,3 +139,69 @@ table .link { display: block; margin-top: 4px; font-size: 12px; }
 .ris-link-actions { display: flex; gap: 12px; flex-wrap: wrap; }
 .ris-alternatives { color: var(--blue-dark); }
 .ris-alternatives summary { cursor: pointer; }
+
+.ris-style-panel { max-width: 1050px; margin: 0 auto 12px; }
+.ris-profile-row { margin: 10px 0 7px; }
+.citation-preview { background: #f2f6fc; border-radius: 8px; padding: 12px; margin: 10px 0; white-space: pre-line; overflow-wrap: anywhere; }
+.ris-extended { margin-top: 12px; }
+.ris-extended summary { color: var(--blue-dark); cursor: pointer; font-weight: 650; }
+
+.batch-workspace { flex: 1; min-height: 0; overflow: auto; padding: 20px 30px 30px; }
+.batch-toolbar, .batch-feedback, .batch-panels { max-width: 1200px; margin-inline: auto; }
+.batch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; padding: 14px 16px; border: 1px solid var(--faint); border-radius: 12px; background: var(--paper); }
+.batch-toolbar > div:last-child { flex-basis: 100%; }
+.batch-control-row, .batch-list-head, .batch-pages, .batch-inline { display: flex; align-items: center; gap: 8px; }
+.batch-control-row { flex-wrap: wrap; }
+.batch-inline { color: var(--subtle); }
+.batch-inline select { max-width: 255px; }
+.batch-feedback { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; min-height: 40px; color: var(--subtle); }
+.batch-feedback .error, .batch-warning, .batch-errors { color: var(--warning); }
+.batch-panels { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(275px, 1fr); align-items: start; gap: 12px; }
+.batch-records, .batch-side { display: grid; align-content: start; gap: 12px; min-width: 0; }
+.batch-list-head { justify-content: space-between; gap: 12px; }
+.batch-list-head h2 { margin: 0; }
+.batch-list-card > p { margin-top: 8px; overflow-wrap: anywhere; }
+.batch-errors { margin: 8px 0; padding-left: 18px; }
+.batch-items { display: grid; gap: 0; margin-top: 8px; }
+.batch-record { display: flex; gap: 9px; padding: 10px 0; border-top: 1px solid var(--faint); }
+.batch-record h3, .batch-record p { overflow-wrap: anywhere; }
+.batch-record p { font-size: 12px; margin-top: 3px; }
+.batch-record input { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; }
+.batch-change { color: var(--blue-dark); }
+.batch-pages { justify-content: space-between; color: var(--subtle); margin-top: 8px; }
+.batch-rules summary, .batch-chat summary, .styles-dialog summary { cursor: pointer; font-weight: 650; }
+.batch-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+.batch-rules-grid label, .styles-dialog form > label { display: grid; gap: 4px; color: var(--subtle); }
+.batch-rules-grid select { min-width: 0; width: 100%; }
+.batch-chat > p { margin: 8px 0; }
+.batch-thread { display: grid; gap: 6px; max-height: 350px; overflow: auto; }
+.batch-message { border-radius: 8px; padding: 8px 10px; background: #f2f5f9; }
+.batch-message.user { background: var(--pale); }
+.batch-message h3 { font-size: 12px; color: var(--subtle); }
+.batch-message p { font-size: 13px; margin-top: 3px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.batch-chat form { display: grid; gap: 8px; margin-top: 10px; }
+.batch-chat form > button { justify-self: end; }
+.batch-chat textarea, .styles-dialog input, .styles-dialog textarea, #batch-rule-name {
+  border: 1px solid #b9c8dc; border-radius: 7px; padding: 7px 9px; font: inherit; color: var(--ink);
+  min-width: 0; background: var(--paper);
+}
+.batch-chat textarea, .styles-dialog textarea { width: 100%; resize: vertical; }
+#batch-save-rule { margin-top: 8px; }
+#batch-rule-name { flex: 1; }
+.citation-samples { margin-top: 8px; }
+.citation-samples .csl-entry { padding: 8px 0; border-top: 1px solid var(--faint); }
+.csl-entry { display: flow-root; overflow-wrap: anywhere; line-height: 1.55; }
+.csl-left-margin { float: left; min-width: 2.1em; margin-right: 4px; }
+.csl-right-inline { overflow: hidden; }
+.styles-dialog {
+  width: min(680px, 90vw); max-height: 85vh; overflow: auto; border: 1px solid var(--faint);
+  border-radius: 12px; padding: 20px; color: var(--ink); background: var(--paper);
+}
+.styles-dialog::backdrop { background: #18233777; }
+.styles-search-form, .styles-dialog details, #styles-status { margin-top: 13px; }
+.styles-results { max-height: 220px; overflow: auto; }
+.styles-entry { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--faint); }
+.styles-entry h3 { text-transform: capitalize; }
+.styles-dialog form > label + label { margin-top: 8px; }
+#styles-analyze, #styles-draft { margin-top: 9px; }
+#styles-draft blockquote { margin: 8px 0; padding-left: 8px; border-left: 3px solid var(--faint); color: var(--subtle); }

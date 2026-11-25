@@ -6,7 +6,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
   <link rel="stylesheet" href="app.css">
   <script defer src="renderer.js"></script>
+  <script defer src="styles-ui.js"></script>
   <script defer src="ris-ui.js"></script>
+  <script defer src="batch-ui.js"></script>
   <title>EndNote ChatGPT</title>
 </head>
 <body>
@@ -37,6 +39,7 @@
   <nav class="mode-switch" aria-label="工作方式">
     <button id="mode-ris" type="button" aria-pressed="true">标题转 RIS</button>
     <button id="mode-xml" type="button" aria-pressed="false">批量检查 XML</button>
+    <button id="mode-batch" type="button" aria-pressed="false">批量转换格式</button>
   </nav>
 
   <main id="ris-workspace" class="ris-workspace">
@@ -54,6 +57,28 @@
       </div>
     </form>
     <p id="ris-status" class="ris-status" role="status" aria-live="polite"></p>
+    <section id="ris-style-panel" class="ris-card ris-style-panel" hidden>
+      <div class="batch-list-head">
+        <h2>引文样式</h2>
+        <div class="batch-control-row">
+          <button id="ris-style-source" class="link" type="button">样式来源</button>
+          <button id="ris-style-ens" class="link" type="button" hidden>EndNote 样式</button>
+        </div>
+      </div>
+      <div class="batch-control-row ris-profile-row">
+        <label class="batch-inline" for="ris-profile">目标期刊
+          <select id="ris-profile" data-profile-picker data-default-profile="nlm"></select>
+        </label>
+        <button id="ris-add-style" type="button">添加模板</button>
+      </div>
+      <p id="ris-style-detail" class="muted"></p>
+      <div id="ris-style-preview" class="citation-preview" aria-live="polite"></div>
+      <p id="ris-style-note" class="field-note" hidden></p>
+      <div class="batch-control-row">
+        <button id="ris-adapted-save" type="button" disabled>保存期刊版 RIS</button>
+        <button id="ris-style-copy" type="button" disabled>复制排版引文</button>
+      </div>
+    </section>
     <div id="ris-result" class="ris-result"></div>
   </main>
 
@@ -88,5 +113,152 @@
       </div>
     </section>
   </main>
+
+  <main id="batch-workspace" class="batch-workspace" hidden>
+    <section class="batch-toolbar" aria-label="批量转换操作">
+      <div class="batch-control-row">
+        <button id="batch-open" type="button">打开 RIS 文件</button>
+        <button id="batch-recent" type="button">使用刚保存的 RIS</button>
+        <label class="batch-inline" for="batch-encoding">编码
+          <select id="batch-encoding">
+            <option value="auto">自动（UTF）</option>
+            <option value="gb18030">GB18030</option>
+            <option value="windows-1252">Windows-1252</option>
+          </select>
+        </label>
+      </div>
+      <div class="batch-control-row">
+        <label class="batch-inline" for="batch-profile">目标期刊
+          <select id="batch-profile" data-profile-picker data-default-profile="nlm"></select>
+        </label>
+        <button id="batch-add-style" type="button">添加模板</button>
+        <label class="batch-inline"><input id="batch-online" type="checkbox"> 先联网补全</label>
+        <button id="batch-cancel" type="button" hidden>停止任务</button>
+      </div>
+      <div class="batch-control-row">
+        <button id="batch-export" class="primary" type="button" disabled>转换并导出 RIS</button>
+        <button id="batch-text" type="button" disabled>导出引文 TXT</button>
+        <button id="batch-copy" type="button" disabled>复制排版引文</button>
+      </div>
+    </section>
+    <div class="batch-feedback" role="status" aria-live="polite">
+      <p id="batch-status">打开一份或多份 RIS，选择本批要应用的期刊模板。</p>
+      <progress id="batch-progress" max="1" value="0" hidden></progress>
+    </div>
+    <div class="batch-panels">
+      <div class="batch-records">
+        <section class="ris-card batch-list-card">
+          <div class="batch-list-head">
+            <h2>文献列表</h2>
+            <div class="batch-control-row">
+              <button id="batch-all" type="button" disabled>全选</button>
+              <button id="batch-none" type="button" disabled>取消全选</button>
+            </div>
+          </div>
+          <p id="batch-files" class="muted" hidden></p>
+          <ul id="batch-errors" class="batch-errors" hidden></ul>
+          <div id="batch-items" class="batch-items"></div>
+          <div class="batch-pages" id="batch-pages" hidden>
+            <button id="batch-back" type="button">上一页</button>
+            <span id="batch-page"></span>
+            <button id="batch-next" type="button">下一页</button>
+          </div>
+        </section>
+        <section class="ris-card">
+          <div class="batch-list-head">
+            <h2>引文预览</h2>
+            <div class="batch-control-row">
+              <button id="batch-style-source" class="link" type="button">样式来源</button>
+              <button id="batch-style-ens" class="link" type="button" hidden>EndNote 样式</button>
+            </div>
+          </div>
+          <p id="batch-style-detail" class="muted" hidden></p>
+          <p id="batch-preview-count" class="muted" hidden></p>
+          <div id="batch-samples" class="citation-samples"></div>
+        </section>
+      </div>
+      <aside class="batch-side" aria-label="本批规则与 ChatGPT">
+        <details class="ris-card batch-rules">
+          <summary>本批规则</summary>
+          <div class="batch-rules-grid">
+            <label>RIS 期刊名
+              <select id="rule-journal" data-batch-rule="journal">
+                <option value="keep">沿用原记录</option>
+                <option value="full">全称</option>
+                <option value="abbreviated">标准缩写</option>
+              </select>
+            </label>
+            <label>题名大小写
+              <select id="rule-title" data-batch-rule="titleCase">
+                <option value="keep">沿用题名</option>
+                <option value="subtitle">冒号后首词大写</option>
+                <option value="sentence">句式大小写</option>
+                <option value="headline">标题式大小写</option>
+              </select>
+            </label>
+            <label>RIS 的 DOI
+              <select id="rule-doi" data-batch-rule="risDoi">
+                <option value="keep">保留 DOI</option>
+                <option value="omit">省略 DOI</option>
+              </select>
+            </label>
+            <label>排序
+              <select id="rule-order" data-batch-rule="order">
+                <option value="style">样式顺序（RIS 按输入）</option>
+                <option value="input">原文件顺序</option>
+                <option value="author">第一作者</option>
+                <option value="year-desc">年份从新到旧</option>
+              </select>
+            </label>
+          </div>
+          <p id="batch-custom-rules" class="field-note" hidden></p>
+          <div id="batch-save-rule" class="batch-control-row" hidden>
+            <input id="batch-rule-name" aria-label="新模板名称" maxlength="90" placeholder="新模板名称">
+            <button id="batch-save-style" type="button">另存规则</button>
+          </div>
+        </details>
+        <details class="ris-card batch-chat">
+          <summary>AI 对话</summary>
+          <p id="batch-chat-status" class="muted" role="status"></p>
+          <div id="batch-thread" class="batch-thread" aria-live="polite"></div>
+          <form id="batch-chat-form">
+            <label class="visually-hidden" for="batch-prompt">批量转换要求</label>
+            <textarea id="batch-prompt" maxlength="2200" rows="4" placeholder="例如：期刊用全称，冒号后首词大写，保留 DOI，导出 RIS。"></textarea>
+            <button id="batch-send" class="primary" type="submit" disabled>发送给 ChatGPT</button>
+          </form>
+        </details>
+      </aside>
+    </div>
+  </main>
+
+  <dialog id="styles-dialog" class="styles-dialog">
+    <div class="batch-list-head">
+      <h2>添加期刊模板</h2>
+      <button id="styles-close" type="button">关闭</button>
+    </div>
+    <form id="styles-search-form" class="styles-search-form">
+      <label for="styles-query">在 CSL 样式库搜索</label>
+      <div class="ris-search-line">
+        <input id="styles-query" type="search" placeholder="期刊英文名，例如 Nature Methods" maxlength="120" required>
+        <button type="submit">搜索</button>
+      </div>
+    </form>
+    <div id="styles-results" class="styles-results"></div>
+    <details id="styles-guide-section">
+      <summary>用 ChatGPT 读取投稿指南</summary>
+      <p id="styles-model-note" class="field-note">请先在工作站右上角连接 ChatGPT 并选择模型。</p>
+      <form id="styles-guide-form">
+        <div class="batch-rules-grid">
+          <label>期刊或模板名称<input id="styles-name" maxlength="90" required></label>
+          <label>基础样式<select id="styles-base" data-profile-picker data-default-profile="nlm"></select></label>
+        </div>
+        <label>投稿指南链接<input id="styles-url" type="url" placeholder="https://"></label>
+        <label>或粘贴参考文献要求和样例<textarea id="styles-guide-text" rows="4" maxlength="380000"></textarea></label>
+        <button id="styles-analyze" class="primary" type="submit">读取规则</button>
+      </form>
+      <div id="styles-draft" hidden></div>
+    </details>
+    <p id="styles-status" class="muted" role="status" aria-live="polite"></p>
+  </dialog>
 </body>
 </html>

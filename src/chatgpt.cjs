@@ -237,4 +237,4 @@ async function suggestCandidate(auth, record, candidates, model, signal) {
   return { index: output.index, reason: clean(output.reason) };
 }
 
-module.exports = { createDesktopAuth, openCallback, officialRequest, translateTitles, suggestCandidate };
+module.exports = { createDesktopAuth, openCallback, officialRequest, translateTitles, suggestCandidate, parseModelJson };

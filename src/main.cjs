@@ -9,8 +9,9 @@ const { providers } = require('./sources.cjs');
 const { inspectRecord, pickFields, sourceDetails } = require('./review.cjs');
 const { createDesktopAuth, translateTitles, suggestCandidate } = require('./chatgpt.cjs');
 
-const { titleRecord, exportRis, risFileName } = require('./ris.cjs');
+const { titleRecord, pickRisFields, risData, risTags, serializeRis, risFileName } = require('./ris.cjs');
 const { findFullText } = require('./fulltext.cjs');
+const { registerFormatting } = require('./formatting.cjs');
 
 const ENTRY = path.join(__dirname, 'index.html');
 const ALLOWED_LANGUAGES = ['Simplified Chinese', 'English'];
@@ -28,6 +29,8 @@ let login;
 let scan;
 let session;
 let risSession;
+let recentRis;
+let formatting;
 let resultMap = new Map();
 
 function createWindow() {
@@ -216,11 +219,6 @@ function currentRis(requireMatch = true) {
   return job;
 }
 
-function risFields(record, group, language) {
-  const blank = { ...record, data: { ...record.data, title: '', doi: '' } };
-  return pickFields(blank, group, validLanguage(language));
-}
-
 function registerRisHandlers() {
   const sources = providers();
   register('ris-search', ({ title, language }) => withScan(async signal => {
@@ -228,7 +226,7 @@ function registerRisHandlers() {
     const record = titleRecord(title);
     const result = await inspectRecord(record, sources, validLanguage(language), signal);
     if (result.selected !== null && result.candidates?.[result.selected]) {
-      result.fields = risFields(record, result.candidates[result.selected].group, language);
+      result.fields = pickRisFields(record, result.candidates[result.selected].group, validLanguage(language));
     }
     risSession = { record, result, links: [], pdfWarning: '', aiWarning: '' };
     return risState(risSession);
@@ -241,7 +239,7 @@ function registerRisHandlers() {
     if (!choice) throw new Error('请选择列表中的论文。');
     Object.assign(job.result, {
       selected: candidate, status: 'matched', note: '',
-      fields: risFields(job.record, choice.group, language)
+      fields: pickRisFields(job.record, choice.group, validLanguage(language))
     });
     job.links = [];
     job.pdfWarning = '';
@@ -286,17 +284,31 @@ function registerRisHandlers() {
     else await shell.openExternal(link.url);
   });
 
-  register('ris-save', async ({ approved }) => {
+  function currentTags(approved) {
     const job = currentRis();
-    const content = exportRis(job.result.fields, Array.isArray(approved) ? approved : []);
+    return risTags(risData(job.result.fields, Array.isArray(approved) ? approved : []), job.links);
+  }
+
+  register('ris-style-preview', ({ approved, profileId }) => formatting.preview(currentTags(approved), profileId));
+  register('ris-style-copy', async ({ approved, profileId }) => {
+    const citation = await formatting.preview(currentTags(approved), profileId);
+    clipboard.write({ text: citation.text, html: citation.html });
+  });
+
+  register('ris-save', async ({ approved, profileId }) => {
+    const job = currentRis();
+    const { tags, profileName } = await formatting.adjusted(currentTags(approved), profileId);
+    const content = serializeRis([tags]);
     const title = job.result.fields.find(field => field.key === 'title')?.proposed;
+    const filename = profileName ? (title || '').slice(0, 55) + '_' + profileName : title;
     const save = await dialog.showSaveDialog(window, {
-      title: '保存 RIS 文献', defaultPath: risFileName(title),
+      title: '保存 RIS 文献', defaultPath: risFileName(filename),
       filters: [{ name: 'RIS', extensions: ['ris'] }]
     });
     if (save.canceled) return null;
     const target = /\.ris$/i.test(save.filePath) ? save.filePath : save.filePath + '.ris';
     await saveOutput(target, content);
+    recentRis = target;
     return path.basename(target);
   });
 }
@@ -427,6 +439,11 @@ else {
   app.whenReady().then(() => {
     Menu.setApplicationMenu(process.platform === 'darwin' ? Menu.buildFromTemplate([{ role: 'appMenu' }, { role: 'editMenu' }]) : null);
     auth = createDesktopAuth({ shell, safeStorage, userData: app.getPath('userData'), http: net.fetch });
+    formatting = registerFormatting({
+      register, dialog, clipboard, shell, getWindow: () => window, userData: app.getPath('userData'),
+      http: net.fetch, saveOutput, withScan, modelFor: getModel, auth, emit,
+      getRecent: () => recentRis, setRecent: file => { recentRis = file; }, sources: providers()
+    });
     registerHandlers();
     return createWindow();
   }).catch(error => {

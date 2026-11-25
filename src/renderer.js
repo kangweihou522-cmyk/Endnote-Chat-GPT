@@ -39,6 +39,12 @@ function asText(value) {
   return (Array.isArray(value) ? value.join('\n') : value) || '—';
 }
 
+function showCitation(target, sanitizedHtml) {
+  const document = new DOMParser().parseFromString(sanitizedHtml, 'text/html');
+  for (const link of document.querySelectorAll('a')) link.removeAttribute('href');
+  target.replaceChildren(...document.body.childNodes);
+}
+
 function inform(text, error = false) {
   notice.textContent = text;
   notice.parentElement.classList.toggle('error', error);
@@ -58,7 +64,20 @@ function sync() {
   model.disabled = !hasModels || Boolean(busy || accountBusy);
   translate.disabled = !hasModels || Boolean(busy || accountBusy);
   language.disabled = Boolean(busy);
+  for (const id of ['mode-ris', 'mode-xml', 'mode-batch']) byId(id).disabled = Boolean(busy || accountBusy);
   window.syncRis?.();
+  window.syncBatch?.();
+  window.styleControls?.sync();
+}
+
+for (const mode of ['ris', 'xml', 'batch']) {
+  byId('mode-' + mode).addEventListener('click', () => {
+    for (const view of ['ris', 'xml', 'batch']) {
+      byId('mode-' + view).setAttribute('aria-pressed', String(view === mode));
+      byId(view + '-workspace').hidden = view !== mode;
+    }
+    for (const id of ['xml-toolbar', 'xml-status']) byId(id).hidden = mode !== 'xml';
+  });
 }
 
 function activeAccount(state, applyDefault = false) {
