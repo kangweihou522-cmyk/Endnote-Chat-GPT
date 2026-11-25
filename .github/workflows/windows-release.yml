@@ -1,6 +1,7 @@
 name: Windows release
 
 on:
+  create:
   push:
     tags:
       - 'v*'
@@ -10,6 +11,7 @@ permissions:
 
 jobs:
   publish:
+    if: github.event_name == 'push' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'release/v'))
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -26,7 +28,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $version = node -p "require('./package.json').version"
-          if ("v$version" -ne $env:GITHUB_REF_NAME) { throw "Tag must match package version." }
+          $tag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($tag -ne $env:GITHUB_REF_NAME) { throw "Tag must match package version." }
+            $releaseRef = @('--verify-tag')
+          } else {
+            if ("release/$tag" -ne $env:GITHUB_REF_NAME) { throw "Release branch must match package version." }
+            $releaseRef = @('--target', $env:GITHUB_SHA)
+          }
           $asset = "EndNote-ChatGPT-v$version-Windows-x64.zip"
           $zip = Join-Path dist $asset
           Compress-Archive -Path dist/EndNote-ChatGPT-win32-x64 -DestinationPath $zip
@@ -37,4 +46,4 @@ jobs:
             ''
             '输入论文标题或 DOI，保存 RIS 并查找 PDF 与全文入口。ChatGPT 译名使用已授权账户的可用订阅额度。EndNote 导入时选择 RefMan RIS。'
           ) | Set-Content -Encoding utf8 dist/release-notes.md
-          gh release create $env:GITHUB_REF_NAME $zip dist/SHA256SUMS.txt --verify-tag --title "EndNote ChatGPT $version" --notes-file dist/release-notes.md
+          gh release create $tag $zip dist/SHA256SUMS.txt @releaseRef --title "EndNote ChatGPT $version" --notes-file dist/release-notes.md

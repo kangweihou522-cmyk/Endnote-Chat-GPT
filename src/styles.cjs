@@ -138,7 +138,7 @@ function styleJournalRule(xml) {
 
 function styleLibrary(userData, http, saveFile) {
   const bundle = name => fs.readFileSync(path.join(__dirname, 'styles', name), 'utf8');
-  const index = bundle('index.txt').trim().split('\n');
+  const index = bundle('index.txt').trim().split(/\r?\n/u);
   const names = new Set(index);
   const builtin = PRESETS.map(([id, name, file, rules, ens, sourceFile]) => styleProfile(
     id, name, bundle(file + '.csl'), rules, CSL_SOURCE + '/blob/' + CSL_REF + '/' + (sourceFile || file + '.csl'),
